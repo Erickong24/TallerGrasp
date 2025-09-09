@@ -1,0 +1,171 @@
+COHESIÓN Y ACOPLAMIENTO EN EL PROYECTO
+
+====================
+SECCIÓN: COHESIÓN
+====================
+
+1) Entidad de Dominio: Pedido (cohesión alta: solo datos del pedido)
+Archivo: taller_grasp/TallerGrasp.ENT/Pedido.cs
+Líneas: 5-11
+  5:     public class Pedido
+  6:     {
+  7:         public int Id { get; set; }
+  8:         public string Estudiante { get; set; } = string.Empty;
+  9:         public string Libro { get; set; } = string.Empty;
+ 10:         public DateTime Fecha { get; set; }
+ 11:     }
+
+2) Servicio de Aplicación: PedidoService (cohesión alta: valida y orquesta, sin I/O ni UI)
+Archivo: taller_grasp/TallerGrasp.APP/PedidoService.cs
+- Dependencia inyectada (separación de responsabilidades):
+  Líneas: 11-16
+ 11:         private readonly IPedidoRepository _repository;
+ 13:         public PedidoService(IPedidoRepository repository)
+ 14:         {
+ 15:             _repository = repository;
+ 16:         }
+
+- RegistrarPedido (valida, crea entidad, delega persistencia):
+  Líneas: 18-36
+ 18:         public Pedido RegistrarPedido(string estudiante, string libro)
+ 19:         {
+ 20:             if (string.IsNullOrWhiteSpace(estudiante))
+ 21:                 throw new ArgumentException("El Estudiante es obligatorio.", nameof(estudiante));
+ 22:             if (string.IsNullOrWhiteSpace(libro))
+ 23:                 throw new ArgumentException("El Libro es obligatorio.", nameof(libro));
+ 25:             var id = _repository.GetMaxId() + 1;
+ 26:             var pedido = new Pedido
+ 27:             {
+ 28:                 Id = id,
+ 29:                 Estudiante = estudiante.Trim(),
+ 30:                 Libro = libro.Trim(),
+ 31:                 Fecha = DateTime.Now
+ 32:             };
+ 34:             _repository.Save(pedido);
+ 35:             return pedido;
+ 36:         }
+
+- ListarPedidos (coordina consulta y ordenamiento de dominio):
+  Líneas: 38-41
+ 38:         public List<Pedido> ListarPedidos()
+ 39:         {
+ 40:             return _repository.GetAll().OrderBy(p => p.Id).ToList();
+ 41:         }
+
+3) Infraestructura: PedidoRepositoryTxt (cohesión alta: toda la persistencia en archivo .txt)
+Archivo: taller_grasp/TallerGrasp.INFRA/PedidoRepositoryTxt.cs
+- Estado y construcción:
+  Líneas: 9-21
+  9:     public class PedidoRepositoryTxt : IPedidoRepository
+ 11:         private readonly string _filePath;
+ 12:         private const string DateFormat = "yyyy-MM-dd HH:mm:ss";
+ 14:         public PedidoRepositoryTxt(string? filePath = null)
+ 16:             _filePath = string.IsNullOrWhiteSpace(filePath)
+ 17:                 ? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "pedidos.txt")
+ 18:                 : Path.GetFullPath(filePath);
+ 20:             EnsureFileExists();
+
+- Preparación del archivo:
+  Líneas: 23-34
+ 23:         private void EnsureFileExists()
+ 25:             var dir = Path.GetDirectoryName(_filePath);
+ 28:                 Directory.CreateDirectory(dir);
+ 32:                 File.WriteAllText(_filePath, string.Empty);
+
+- Lectura/mapeo de pedidos desde texto:
+  Líneas: 36-68
+ 36:         public IEnumerable<Pedido> GetAll()
+ 40:             foreach (var line in File.ReadAllLines(_filePath))
+ 43:                 var parts = line.Split('|');
+ 46:                 if (!int.TryParse(parts[0], out var id)) continue;
+ 60:                 yield return new Pedido
+ 61:                 {
+ 62:                     Id = id,
+ 63:                     Estudiante = estudiante,
+ 64:                     Libro = libro,
+ 65:                     Fecha = fecha
+ 66:                 };
+
+- Escritura de pedidos en texto:
+  Líneas: 70-79
+ 70:         public void Save(Pedido pedido)
+ 72:             var line = string.Join("|",
+ 78:             File.AppendAllText(_filePath, line + Environment.NewLine);
+
+- Cálculo de MaxId desde archivo:
+  Líneas: 81-98
+ 81:         public int GetMaxId()
+ 83:             int maxId = 0;
+ 86:             foreach (var line in File.ReadAllLines(_filePath))
+ 91:                 if (int.TryParse(parts[0], out var id))
+ 97:             return maxId;
+
+4) GUI/Consola: Program (cohesión alta: solo UI, captura input y muestra output)
+Archivo: taller_grasp/TallerGrasp.GUI/Program.cs
+- Composición de dependencias y menú:
+  Líneas: 12-24, 26-36
+ 12:             var filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "pedidos.txt");
+ 13:             var repository = new PedidoRepositoryTxt(filePath);
+ 14:             var service = new PedidoService(repository);
+ 19:                 Console.WriteLine("1) Registrar un nuevo pedido");
+ 20:                 Console.WriteLine("2) Listar todos los pedidos");
+ 26:                 switch (opt)
+ 28:                     case "1":
+ 29:                         Registrar(service);
+ 31:                     case "2":
+ 32:                         Listar(service);
+
+- Registrar (interacción con usuario y delegación al servicio):
+  Líneas: 44-57, 68-69
+ 55:                 var pedido = service.RegistrarPedido(estudiante, libro);
+ 56:                 Console.WriteLine("Pedido registrado:");
+ 57:                 Console.WriteLine($"{pedido.Id} | {pedido.Estudiante} | {pedido.Libro} | {pedido.Fecha:yyyy-MM-dd HH:mm:ss}");
+ 68:             Pause();
+ 69:         }
+
+- Listar (usa servicio y muestra resultados):
+  Líneas: 71-76, 83-86, 89-90
+ 75:             var pedidos = service.ListarPedidos();
+ 83:                 foreach (var p in pedidos)
+ 85:                     Console.WriteLine($"{p.Id} | {p.Estudiante} | {p.Libro} | {p.Fecha:yyyy-MM-dd HH:mm:ss}");
+ 89:             Pause();
+ 90:         }
+
+
+====================
+SECCIÓN: ACOPLAMIENTO
+====================
+
+1) Bajo acoplamiento APP→INFRA mediante interfaz
+Archivo: taller_grasp/TallerGrasp.APP/PedidoService.cs
+Líneas clave:
+ 11:         private readonly IPedidoRepository _repository;
+ 13:         public PedidoService(IPedidoRepository repository)
+ 25:             var id = _repository.GetMaxId() + 1;
+ 34:             _repository.Save(pedido);
+ 40:             return _repository.GetAll().OrderBy(p => p.Id).ToList();
+
+2) Acoplamiento GUI→APP (uso del servicio) y GUI→INFRA (instanciación concreta)
+Archivo: taller_grasp/TallerGrasp.GUI/Program.cs
+Líneas clave:
+ 13:             var repository = new PedidoRepositoryTxt(filePath);   // acoplamiento a implementación concreta
+ 14:             var service = new PedidoService(repository);           // composición de APP
+ 55:                 var pedido = service.RegistrarPedido(estudiante, libro);
+ 75:             var pedidos = service.ListarPedidos();
+
+3) Acoplamiento INFRA→ENT (mapeo y contratos) e interfaz que expone entidades
+Archivo: taller_grasp/TallerGrasp.INFRA/PedidoRepositoryTxt.cs
+Líneas clave:
+  5: using TallerGrasp.ENT;
+ 60:                 yield return new Pedido
+ 70:         public void Save(Pedido pedido)
+
+Archivo: taller_grasp/TallerGrasp.INFRA/IPedidoRepository.cs
+Líneas clave:
+  2: using TallerGrasp.ENT;
+  8:         IEnumerable<Pedido> GetAll();
+  9:         void Save(Pedido pedido);
+ 10:         int GetMaxId();
+
+
+
